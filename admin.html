@@ -5,6 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Админ-панель</title>
   <link rel="stylesheet" href="style.css" />
+  <style>
+    .orders-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .orders-table th, .orders-table td {
+      padding: 10px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      vertical-align: top;
+    }
+    .orders-table th { background: #f1f5f9; font-weight: 600; }
+    .orders-table tr:hover { background: #f8fafc; }
+    .order-del {
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .orders-empty { text-align: center; color: #94a3b8; padding: 40px; }
+  </style>
 </head>
 <body style="background:#f8fafc;">
 
@@ -22,23 +43,42 @@
 <!-- ПАНЕЛЬ -->
 <div id="adminPanel" class="hidden">
   <div class="admin-header">
-    <h2>⚙️ Редактирование сайта</h2>
+    <h2>⚙️ Панель управления</h2>
     <div>
-      <button class="btn-primary" id="saveBtn">💾 Сохранить</button>
-      <button class="btn-secondary" id="downloadBtn">⬇️ Скачать data.js</button>
+      <button class="btn-primary" id="tabContent">📝 Контент</button>
+      <button class="btn-secondary" id="tabOrders">📦 Заказы (<span id="ordersCount">0</span>)</button>
       <a href="index.html" class="btn-secondary">← На сайт</a>
     </div>
   </div>
-  <div class="admin-body" id="adminForm"></div>
+
+  <!-- ВКЛАДКА КОНТЕНТА -->
+  <div id="contentTab" class="admin-body">
+    <div style="text-align:right; margin-bottom:15px;">
+      <button class="btn-primary" id="saveBtn">💾 Сохранить</button>
+      <button class="btn-secondary" id="downloadBtn">⬇️ Скачать data.js</button>
+    </div>
+    <div id="adminForm"></div>
+  </div>
+
+  <!-- ВКЛАДКА ЗАКАЗОВ -->
+  <div id="ordersTab" class="admin-body hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+      <h3 style="margin:0;">Заказы клиентов</h3>
+      <div>
+        <button class="btn-primary" id="exportOrders">⬇️ Экспорт заказов (JSON)</button>
+        <button class="btn-secondary" id="clearOrders" style="background:#dc2626; color:#fff;">🗑️ Очистить все</button>
+      </div>
+    </div>
+    <div id="ordersList"></div>
+  </div>
+
   <div id="saveStatus" class="save-status"></div>
 </div>
 
 <script src="data.js"></script>
 <script>
-// ====== ПАРОЛЬ ======
 const ADMIN_PASSWORD = 'admin123';
 
-// ====== Загружаем данные (localStorage или data.js) ======
 let data = JSON.parse(localStorage.getItem('siteData')) || JSON.parse(JSON.stringify(SITE_DATA));
 
 // ====== ВХОД ======
@@ -51,12 +91,24 @@ document.getElementById('loginBtn').onclick = () => {
     loginScreen.classList.add('hidden');
     adminPanel.classList.remove('hidden');
     renderForm();
+    renderOrders();
   } else {
     document.getElementById('loginError').textContent = 'Неверный пароль';
   }
 };
 
-// ====== ФОРМА РЕДАКТИРОВАНИЯ ======
+// ====== ВКЛАДКИ ======
+document.getElementById('tabContent').onclick = () => {
+  document.getElementById('contentTab').classList.remove('hidden');
+  document.getElementById('ordersTab').classList.add('hidden');
+};
+document.getElementById('tabOrders').onclick = () => {
+  document.getElementById('ordersTab').classList.remove('hidden');
+  document.getElementById('contentTab').classList.add('hidden');
+  renderOrders();
+};
+
+// ====== ФОРМА РЕДАКТИРОВАНИЯ КОНТЕНТА ======
 function renderForm() {
   const f = document.getElementById('adminForm');
   f.innerHTML = `
@@ -152,7 +204,6 @@ function renderProd() {
   });
 }
 
-// ====== ДОБАВЛЕНИЕ / УДАЛЕНИЕ ======
 function addAdv() {
   data.advantages.push({ icon: '✨', title: 'Новое', text: 'Описание' });
   renderAdv();
@@ -164,13 +215,12 @@ function addProd() {
 }
 function delProd(i) { data.products.splice(i, 1); renderProd(); }
 
-// ====== СОХРАНЕНИЕ ======
+// ====== СОХРАНЕНИЕ КОНТЕНТА ======
 document.getElementById('saveBtn').onclick = () => {
   localStorage.setItem('siteData', JSON.stringify(data));
-  showStatus('✅ Сохранено в браузере!');
+  showStatus('✅ Сохранено!');
 };
 
-// ====== СКАЧАТЬ data.js ======
 document.getElementById('downloadBtn').onclick = () => {
   const content = '// ============================================\n' +
                   '//   БАЗА ДАННЫХ САЙТА — редактируется в админке\n' +
@@ -186,15 +236,96 @@ document.getElementById('downloadBtn').onclick = () => {
   showStatus('⬇️ Файл data.js скачан!');
 };
 
+// ====== ЗАКАЗЫ ======
+function getOrders() {
+  return JSON.parse(localStorage.getItem('orders') || '[]');
+}
+function setOrders(orders) {
+  localStorage.setItem('orders', JSON.stringify(orders));
+  updateOrdersCount();
+}
+
+function updateOrdersCount() {
+  document.getElementById('ordersCount').textContent = getOrders().length;
+}
+
+function renderOrders() {
+  updateOrdersCount();
+  const wrap = document.getElementById('ordersList');
+  const orders = getOrders();
+
+  if (orders.length === 0) {
+    wrap.innerHTML = '<div class="orders-empty">📭 Заказов пока нет</div>';
+    return;
+  }
+
+  let html = `<table class="orders-table">
+    <thead><tr>
+      <th>#</th><th>Дата</th><th>Товар</th><th>Кол-во</th>
+      <th>Клиент</th><th>Контакты</th><th>Адрес</th><th>Комм.</th><th></th>
+    </tr></thead><tbody>`;
+
+  orders.slice().reverse().forEach((o, idx) => {
+    const realIdx = orders.length - 1 - idx;
+    html += `<tr>
+      <td>${realIdx + 1}</td>
+      <td>${o.date || '—'}</td>
+      <td><b>${escapeHtml(o.product)}</b><br><small>${o.price}</small></td>
+      <td>${o.quantity}</td>
+      <td>${escapeHtml(o.name)}</td>
+      <td>📞 ${escapeHtml(o.phone)}<br>✉️ ${escapeHtml(o.email || '—')}</td>
+      <td>${escapeHtml(o.address)}</td>
+      <td><small>${escapeHtml(o.comment || '—')}</small></td>
+      <td><button class="order-del" onclick="deleteOrder(${realIdx})">✖</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+window.deleteOrder = function (i) {
+  if (!confirm('Удалить этот заказ?')) return;
+  const orders = getOrders();
+  orders.splice(i, 1);
+  setOrders(orders);
+  renderOrders();
+};
+
+document.getElementById('exportOrders').onclick = () => {
+  const orders = getOrders();
+  if (orders.length === 0) {
+    showStatus('📭 Заказов нет');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(orders, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'orders.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showStatus('⬇️ Заказы экспортированы');
+};
+
+document.getElementById('clearOrders').onclick = () => {
+  if (!confirm('Удалить ВСЕ заказы? Это действие необратимо.')) return;
+  setOrders([]);
+  renderOrders();
+  showStatus('🗑️ Заказы очищены');
+};
+
+// ====== УТИЛИТЫ ======
 function showStatus(text) {
   const s = document.getElementById('saveStatus');
   s.textContent = text;
   s.classList.add('show');
   setTimeout(() => s.classList.remove('show'), 2000);
 }
-
 function esc(s) {
   return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 </script>
 </body>
